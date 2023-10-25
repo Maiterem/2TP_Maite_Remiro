@@ -1,0 +1,173 @@
+---
+title: "TP N° 2"
+author: "Maité Remiro"
+date: "2023-10-25"
+output: html_document
+---
+
+
+## Puntos Verdes - Ciudad Autónoma de Buenos Aires
+
+En el marco del trabajo n° 2 de la materia *Instrumentos de Análisis Urbanos II* se pretende dar respuesta a un interrogante específico: *¿Existen barrios con una mayor concentración de puntos verdes? ¿cuál es su distribución en la ciudad?*
+
+Para esto se trabajará con 2 dataset específicos, uno denominado "barrios_caba", el cual contiene la delimitación geográfica de este territorio, indentificando barrio, comuna, sup_km2 y su geometría correspondiente. Mientras que el segundo, denominado "p_verdes" incluye información relativa a los puntos verdes de al Ciudad Autónoma de Buenos Aires. 
+
+Estos dataset atravesaran una serie de transformaciones, a los fines de intentar dar respuesta al interrogante.
+
+# Carga de Librerias y bases de datos.
+
+Se procede a cargar las librerias y datset necesarios para el análisis:
+
+```{r}
+library(ggplot2)
+library(sf)
+library(dplyr)
+library(geofacet)
+```
+
+
+```{r}
+barrios_caba <- st_read("data/barrios_caba.shp",
+                        stringsAsFactors = TRUE,
+                        options = "ENCODING=latin1")
+```
+
+
+```{r}
+p_verdes <- read.csv("data/puntos_verdes.csv",
+                         encoding = "latin1",
+                         stringsAsFactors = TRUE)
+```
+
+
+# Análisis.
+
+Una vez realizado el paso anterior, teniendo en cuenta que el conjunto de datos espaciales que compone el dataset de "p_verdes" es de formato "WKT", se procede a dividirlo en dos columnas: longitud y latitud, a los fines de facilitar la aplicación de funciones específicas para el análisis.
+
+```{r}
+p_verdes_2 <- p_verdes %>% st_as_sf(wkt = "WKT")
+```
+
+
+```{r}
+p_verdes_2$latitud <- st_coordinates(p_verdes_2)[, "Y"]
+p_verdes_2$longitud <- st_coordinates(p_verdes_2)[, "X"]
+```
+
+Seguidamente, se grafica la información en un mapa para visualizar como lucen los puntos en el espacio, para esto también fue necesario modificar el formato del dataset a clase "SF". 
+
+```{r}
+class(p_verdes_2)
+```
+
+```{r}
+ggplot() +
+  geom_point(data=p_verdes_2, aes(x=longitud, y=latitud))
+```
+
+Dado que esta representación no aporta información de calidad para el analisis propuesto, se incluye un mapa base de la Ciudad Autónoma de Buenos Aires. Teniendo en cuenta que el presente data frame no tiene asignado un CRS, se realizan las funciones necesarias para realizarlo y luego graficarlo. 
+
+```{r}
+crs_buenos_aires <- st_crs(4326)
+```
+
+```{r}
+p_verdes_2 <- st_set_crs(p_verdes_2, crs_buenos_aires)
+```
+
+Se verifica la función aplicada.
+```{r}
+print(p_verdes_2)
+```
+
+Al verificar que la función fue correctamente ejecutda, se pasa a graficar los puntos verdes con el mapa base.
+
+
+```{r}
+ggplot()+
+  geom_sf(data=barrios_caba)+
+  geom_sf(data=p_verdes_2, aes(color=barrio), alpha=0.5)+
+  labs(color="Puntos Verdes")+
+  theme_minimal()
+```
+
+El presente mapa permite visualizar de forma más clara su distribución espacial según barrio. Si bien se puede observar a simple vista mayor concentración en algunos barrios en relación a otros, se decide realizar una unión espacial del dataset "barrios_caba" con el de "p_vderdes_2", para concentrar la información de relevancia de ambos sets en una única tabla.
+
+```{r}
+pverdes_geo <- st_join(barrios_caba, p_verdes_2)
+```
+
+Con los datos agrupados y un único valor para cada barrio, se realiza un conteo de puntos verdes según barrio y un calculo de densidad, teniendo en cuenta la sup_km2 de cada barrio. A los fines de gráficar esto último, se transforma el formato de uno de los dataset, quitandole su geometría.
+
+
+```{r}
+Cantidad <- pverdes_geo %>%
+  group_by(barrio.x) %>%
+  summarise(cantidad=n(),
+ densidad=mean(cantidad/sup_km2))
+```
+
+```{r}
+cantidad_pv <- Cantidad %>%
+  st_drop_geometry()
+```
+
+```{r}
+ggplot(Cantidad, aes(x = barrio.x, y = cantidad )) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) +
+  labs(x = "Barrio", y = "Cantidad")
+```
+
+Como se puede observar, el máximo de puntos verdes por barrio es de 6 puntos verdes, mientras que el mínimo es 1, es decir que se puede afirmar que la totalidad de barrios de la CABA poseen al menos un punto verde. Por su parte, los tres barrios con mayor presencia de puntos verdes son Flores, Saavedera, Belgrano. Asimismo, también se puede obsevar que el total "1", es el valor más repetido.
+
+Se realiza el mismo proceso pero con la variable "densidad".
+
+```{r}
+ggplot() +
+  geom_bar(data = Cantidad %>% top_n(48, densidad),
+           aes(x = reorder(barrio.x, -densidad), weight = densidad),
+           fill = "#52796f") +
+  labs(title = "Densidad por Barrio",
+       subtitle = "Cantidad según sup_Km2",
+       x = "Barrio",
+       y = "Densidad") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size= 5))
+```
+
+A partir del mismo se puede tomar conocimiento de que no hay una relación directa entre la cantidad de puntos verdes y la superficie de cada barrio, es decir que hay una medida asociada a cada barrio relativamente baja, en comparación con la unidad de área que estás considerando.
+
+Dado que el gráfico de barras no es la herramienta más propicia para visualizar los resultados en función de los valores, se realizan las funciones necesarias para poder visualizar la misma en un mapa.
+
+```{r}
+renombre <- cantidad_pv %>%
+  rename(barrio = barrio.x)
+```
+
+```{r}
+barrios_caba_2 <- left_join(barrios_caba, renombre, by="barrio")
+```
+
+```{r}
+ggplot()+
+  geom_sf(data=Cantidad, aes(fill=densidad), color="white")+
+    labs(title = "Puntos verdes - Cantidad por Km2",
+         subtitle = "Barrios de CABA",
+         fill = "densidad",
+         caption= "Fuente: Datos abiertos GCBA") +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  theme_minimal() 
+```
+
+A partir de este mapa se puede visualizar con mayor claridad el argumento detallado anteriormente, es decir, que la cantidad de puntos verdes es relativamente baja, en función de la superficie en km2 de cada barrio.
+
+## Conslusiones
+
+En el presente analisis se fueron desarrollando una serie de códigos que intentan dar respuesta al interrogante inicialmente planteado: *¿Existen barrios con una mayor concentración de puntos verdes? ¿cuál es su distribución en la ciudad?*
+
+Mediante esta se pudo identificar y *visualizar* que sí existen barrios con una mayor concentración de puntos, y que su distribución en los mismos no es homogenea, sino más bien diversa. 
+
+En función de su distribución se puede afirmar que los barrios tienen al menos un punto verde, y que el máximo de puntos por barrio equivale a 6.No se puede asegurar que hay una relación directa entre la cantidad de puntos y la ubicación central o periférica de los barrios, ya que su distribución es bien diversa.
+
+Para un futuro análisis, se considera pertinente analizar esta información a la luz de la densidad poblacional y, a su vez, complejizar el mismo incluyendo variables temporoespaciales a partir de la variable "centros de clasificación". De esta forma se puede analizar una posible relación entre la cantidad y ubicación de los puntos, en función de la cantidad y ubicación de los centros de clasificación de materiales reciclables.
